@@ -1,0 +1,250 @@
+﻿@page "/wildfire"
+
+<div class="container mt-5">
+    <h3 class="text-center mb-4">Wildfire Simulator with Wind</h3>
+
+    <!-- Controls Section -->
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <form>
+                        <div class="form-group">
+                            <label for="pForest">Forest Fire Spread Probability (0-1)</label>
+                            <input type="range" class="form-control-range" id="pForest" min="0" max="1" step="0.01" @bind="P_Forest" />
+                            <small class="form-text text-muted">@P_Forest</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="pResidential">Residential Fire Spread Probability (0-1)</label>
+                            <input type="range" class="form-control-range" id="pResidential" min="0" max="1" step="0.01" @bind="P_Residential" />
+                            <small class="form-text text-muted">@P_Residential</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="windDirection">Wind Direction</label>
+                            <select class="form-control" id="windDirection" @bind="selectedWindDirection">
+                                <option value="N">N</option>
+                                <option value="NE">NE</option>
+                                <option value="E">E</option>
+                                <option value="SE">SE</option>
+                                <option value="S">S</option>
+                                <option value="SW">SW</option>
+                                <option value="W">W</option>
+                                <option value="NW">NW</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="windSpeed">Wind Speed (0-10)</label>
+                            <input type="range" class="form-control-range" id="windSpeed" min="0" max="10" step="0.1" @bind="windSpeed" />
+                            <small class="form-text text-muted">@windSpeed</small>
+                        </div>
+                        <button type="button" class="btn btn-primary" @onclick="StartSimulation">Start Simulation</button>
+                        @if (simulationEnded)
+                        {
+                            <p class="mt-3 text-center">Simulation ended</p>
+                        }
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grid Visualization Section -->
+    <div class="row justify-content-center mt-4">
+        <div class="col-md-8">
+            <div class="text-center">
+                <table class="table table-bordered mx-auto" style="width: auto;">
+                    @for (int i = 0; i < N; i++)
+                    {
+                        <tr>
+                            @for (int j = 0; j < M; j++)
+                            {
+                                @if (grid != null)
+                                {
+                                    <td class="@GetCellClass(grid[i, j])"></td>
+                                }
+                            }
+                        </tr>
+                    }
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Styles for Grid Cells -->
+<style>
+    .forest {
+        background-color: green;
+    }
+
+    .residential {
+        background-color: brown;
+    }
+
+    .burning {
+        background-color: red;
+    }
+
+    .burnt {
+        background-color: black;
+    }
+
+    td {
+        width: 20px;
+        height: 20px;
+        border: 1px solid #ccc;
+    }
+</style>
+
+@code {
+    private int[,] grid;
+    private const int N = 20;
+    private const int M = 20;
+    private double P_Forest = 0.5;
+    private double P_Residential = 0.3;
+    private string selectedWindDirection = "N";
+    private double windSpeed = 5.0;
+    private System.Threading.Timer timer;
+    private Random rand = new Random();
+    private bool simulationEnded = false;
+    private Dictionary<string, (int, int)> windVectors = new Dictionary<string, (int, int)>
+   {
+       {"N", (1, 0)},   // From North, blowing South
+       {"NE", (1, -1)}, // From Northeast, blowing Southwest
+       {"E", (0, -1)},  // From East, blowing West
+       {"SE", (-1, -1)},// From Southeast, blowing Northwest
+       {"S", (-1, 0)},  // From South, blowing North
+       {"SW", (-1, 1)}, // From Southwest, blowing Northeast
+       {"W", (0, 1)},   // From West, blowing East
+       {"NW", (1, 1)}   // From Northwest, blowing Southeast
+   };
+
+    protected override void OnInitialized()
+    {
+        InitializeGrid();
+    }
+
+    private void InitializeGrid()
+    {
+        simulationEnded = false;
+        grid = new int[N, M];
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < M; j++)
+            {
+                if (i >= 15) // Bottom 5 rows are residential
+                    grid[i, j] = 1; // Residential
+                else
+                    grid[i, j] = 0; // Forest
+            }
+        }
+    }
+
+    private void StartSimulation()
+    {
+        simulationEnded = false;
+        InitializeGrid();
+        grid[0, 10] = 2; // Start fire at top middle
+        StateHasChanged();
+        timer?.Dispose();
+        timer = new System.Threading.Timer(UpdateGrid, null, 0, 1000); // Update every second
+    }
+
+    private void UpdateGrid(object state)
+    {
+        int[,] nextGrid = new int[N, M];
+        bool hasBurning = false;
+        var windVector = windVectors[selectedWindDirection];
+        int wdx = windVector.Item1;
+        int wdy = windVector.Item2;
+        double lengthWind = Math.Sqrt(wdx * wdx + wdy * wdy);
+
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < M; j++)
+            {
+                if (grid[i, j] == 3) // Burnt
+                {
+                    nextGrid[i, j] = 3;
+                }
+                else if (grid[i, j] == 2) // Burning
+                {
+                    nextGrid[i, j] = 3; // Becomes Burnt
+                    hasBurning = true;
+                }
+                else // Forest (0) or Residential (1)
+                {
+                    List<(int di, int dj)> burningNeighbors = GetBurningNeighbors(i, j);
+                    if (burningNeighbors.Count > 0)
+                    {
+                        double maxEffect = double.MinValue;
+                        foreach (var (di, dj) in burningNeighbors)
+                        {
+                            // Direction from burning neighbor to current cell
+                            double dot = wdx * (-di) + wdy * (-dj);
+                            double lengthSpread = Math.Sqrt(di * di + dj * dj);
+                            double effect = dot / (lengthSpread * lengthWind);
+                            maxEffect = Math.Max(maxEffect, effect);
+                        }
+                        double baseProbability = grid[i, j] == 0 ? P_Forest : P_Residential;
+                        double windFactor = (windSpeed / 10.0) * 0.3; // Max effect of 0.3 at windSpeed=10
+                        double p = baseProbability + windFactor * maxEffect;
+                        p = Math.Max(0, Math.Min(1, p));
+                        if (rand.NextDouble() < p)
+                        {
+                            nextGrid[i, j] = 2; // Catches fire
+                            hasBurning = true;
+                        }
+                        else
+                        {
+                            nextGrid[i, j] = grid[i, j];
+                        }
+                    }
+                    else
+                    {
+                        nextGrid[i, j] = grid[i, j];
+                    }
+                }
+            }
+        }
+
+        grid = nextGrid;
+        if (!hasBurning)
+        {
+            timer.Dispose();
+            simulationEnded = true;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private List<(int, int)> GetBurningNeighbors(int i, int j)
+    {
+        var burningNeighbors = new List<(int, int)>();
+        for (int di = -1; di <= 1; di++)
+        {
+            for (int dj = -1; dj <= 1; dj++)
+            {
+                if (di == 0 && dj == 0) continue;
+                int ni = i + di;
+                int nj = j + dj;
+                if (ni >= 0 && ni < N && nj >= 0 && nj < M && grid[ni, nj] == 2)
+                {
+                    burningNeighbors.Add((di, dj));
+                }
+            }
+        }
+        return burningNeighbors;
+    }
+
+    private string GetCellClass(int state)
+    {
+        return state switch
+        {
+            0 => "forest",
+            1 => "residential",
+            2 => "burning",
+            3 => "burnt",
+            _ => ""
+        };
+    }
+}
