@@ -1,7 +1,7 @@
 ﻿@page "/wildfire"
 
 <div class="container mt-5">
-    <h3 class="text-center mb-4">Wildfire Simulator with Wind</h3>
+    <h3 class="text-center mb-4">Wildfire Simulator with Wind and Embers</h3>
 
     <!-- Controls Section -->
     <div class="row justify-content-center">
@@ -20,6 +20,11 @@
                             <small class="form-text text-muted">@P_Residential</small>
                         </div>
                         <div class="form-group">
+                            <label for="pEmber">Ember Ignition Probability (0-1)</label>
+                            <input type="range" class="form-control-range" id="pEmber" min="0" max="1" step="0.01" @bind="P_Ember" />
+                            <small class="form-text text-muted">@P_Ember</small>
+                        </div>
+                        <div class="form-group">
                             <label for="windDirection">Wind Direction</label>
                             <select class="form-control" id="windDirection" @bind="selectedWindDirection">
                                 <option value="N">N</option>
@@ -33,14 +38,18 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="windSpeed">Wind Speed (0-10)</label>
-                            <input type="range" class="form-control-range" id="windSpeed" min="0" max="10" step="0.1" @bind="windSpeed" />
+                            <label for="windSpeed">Wind Speed (0-100)</label>
+                            <input type="range" class="form-control-range" id="windSpeed" min="0" max="100" step="1" @bind="windSpeed" />
                             <small class="form-text text-muted">@windSpeed</small>
                         </div>
                         <button type="button" class="btn btn-primary" @onclick="StartSimulation">Start Simulation</button>
                         @if (simulationEnded)
                         {
-                            <p class="mt-3 text-center">Simulation ended</p>
+                            <p class="mt-3 text-center">Simulation ended after @timeStep seconds</p>
+                        }
+                        else
+                        {
+                            <p class="mt-3 text-center">Time: @timeStep seconds</p>
                         }
                     </form>
                 </div>
@@ -89,35 +98,42 @@
         background-color: black;
     }
 
+    .road {
+        background-color: gray;
+    }
+
     td {
-        width: 20px;
-        height: 20px;
+        width: 15px;
+        height: 15px;
         border: 1px solid #ccc;
     }
 </style>
 
 @code {
     private int[,] grid;
-    private const int N = 20;
-    private const int M = 20;
+    private const int N = 40;
+    private const int M = 40;
     private double P_Forest = 0.5;
     private double P_Residential = 0.3;
+    private double P_Ember = 0.2; // New ember ignition probability
     private string selectedWindDirection = "N";
     private double windSpeed = 5.0;
+    private int timeStep = 0;
     private System.Threading.Timer timer;
     private Random rand = new Random();
     private bool simulationEnded = false;
+    private const double EmberGenerationChance = 0.2; // 20% chance per burning cell
     private Dictionary<string, (int, int)> windVectors = new Dictionary<string, (int, int)>
-   {
-       {"N", (1, 0)},   // From North, blowing South
-       {"NE", (1, -1)}, // From Northeast, blowing Southwest
-       {"E", (0, -1)},  // From East, blowing West
-       {"SE", (-1, -1)},// From Southeast, blowing Northwest
-       {"S", (-1, 0)},  // From South, blowing North
-       {"SW", (-1, 1)}, // From Southwest, blowing Northeast
-       {"W", (0, 1)},   // From West, blowing East
-       {"NW", (1, 1)}   // From Northwest, blowing Southeast
-   };
+    {
+        {"N", (1, 0)},   // From North, blowing South
+        {"NE", (1, -1)}, // From Northeast, blowing Southwest
+        {"E", (0, -1)},  // From East, blowing West
+        {"SE", (-1, -1)},// From Southeast, blowing Northwest
+        {"S", (-1, 0)},  // From South, blowing North
+        {"SW", (-1, 1)}, // From Southwest, blowing Northeast
+        {"W", (0, 1)},   // From West, blowing East
+        {"NW", (1, 1)}   // From Northwest, blowing Southeast
+    };
 
     protected override void OnInitialized()
     {
@@ -127,15 +143,18 @@
     private void InitializeGrid()
     {
         simulationEnded = false;
+        timeStep = 0;
         grid = new int[N, M];
         for (int i = 0; i < N; i++)
         {
             for (int j = 0; j < M; j++)
             {
-                if (i >= 15) // Bottom 5 rows are residential
-                    grid[i, j] = 1; // Residential
-                else
+                if (i < 25) // Top 25 rows are forest
                     grid[i, j] = 0; // Forest
+                else if (i == 28 || i == 34 || j == 10 || j == 20 || j == 30) // Roads
+                    grid[i, j] = 4; // Road
+                else if (i >= 25) // Residential areas between roads
+                    grid[i, j] = 1; // Residential
             }
         }
     }
@@ -144,7 +163,7 @@
     {
         simulationEnded = false;
         InitializeGrid();
-        grid[0, 10] = 2; // Start fire at top middle
+        grid[0, 20] = 2; // Start fire at top middle
         StateHasChanged();
         timer?.Dispose();
         timer = new System.Threading.Timer(UpdateGrid, null, 0, 1000); // Update every second
@@ -152,6 +171,7 @@
 
     private void UpdateGrid(object state)
     {
+        timeStep++;
         int[,] nextGrid = new int[N, M];
         bool hasBurning = false;
         var windVector = windVectors[selectedWindDirection];
@@ -159,6 +179,16 @@
         int wdy = windVector.Item2;
         double lengthWind = Math.Sqrt(wdx * wdx + wdy * wdy);
 
+        // Copy current grid to nextGrid as starting point
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < M; j++)
+            {
+                nextGrid[i, j] = grid[i, j];
+            }
+        }
+
+        // Step 1: Handle existing burning cells and neighbor spread
         for (int i = 0; i < N; i++)
         {
             for (int j = 0; j < M; j++)
@@ -167,12 +197,16 @@
                 {
                     nextGrid[i, j] = 3;
                 }
+                else if (grid[i, j] == 4) // Road - doesn't burn
+                {
+                    nextGrid[i, j] = 4;
+                }
                 else if (grid[i, j] == 2) // Burning
                 {
                     nextGrid[i, j] = 3; // Becomes Burnt
                     hasBurning = true;
                 }
-                else // Forest (0) or Residential (1)
+                else if (grid[i, j] == 0 || grid[i, j] == 1) // Forest or Residential
                 {
                     List<(int di, int dj)> burningNeighbors = GetBurningNeighbors(i, j);
                     if (burningNeighbors.Count > 0)
@@ -180,14 +214,13 @@
                         double maxEffect = double.MinValue;
                         foreach (var (di, dj) in burningNeighbors)
                         {
-                            // Direction from burning neighbor to current cell
                             double dot = wdx * (-di) + wdy * (-dj);
                             double lengthSpread = Math.Sqrt(di * di + dj * dj);
                             double effect = dot / (lengthSpread * lengthWind);
                             maxEffect = Math.Max(maxEffect, effect);
                         }
                         double baseProbability = grid[i, j] == 0 ? P_Forest : P_Residential;
-                        double windFactor = (windSpeed / 10.0) * 0.3; // Max effect of 0.3 at windSpeed=10
+                        double windFactor = (windSpeed / 10.0) * 0.3;
                         double p = baseProbability + windFactor * maxEffect;
                         p = Math.Max(0, Math.Min(1, p));
                         if (rand.NextDouble() < p)
@@ -195,14 +228,33 @@
                             nextGrid[i, j] = 2; // Catches fire
                             hasBurning = true;
                         }
-                        else
-                        {
-                            nextGrid[i, j] = grid[i, j];
-                        }
                     }
-                    else
+                }
+            }
+        }
+
+        // Step 2: Handle ember generation and spread
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < M; j++)
+            {
+                if (grid[i, j] == 2 && rand.NextDouble() < EmberGenerationChance) // Burning cell generates an ember
+                {
+                    int maxDistance = (int)windSpeed; // Wind speed determines max ember travel
+                    if (maxDistance > 0)
                     {
-                        nextGrid[i, j] = grid[i, j];
+                        int distance = rand.Next(1, maxDistance + 1); // Random distance up to max
+                        int newI = i + distance * wdx;
+                        int newJ = j + distance * wdy;
+
+                        if (newI >= 0 && newI < N && newJ >= 0 && newJ < M) // Within grid bounds
+                        {
+                            if ((nextGrid[newI, newJ] == 0 || nextGrid[newI, newJ] == 1) && rand.NextDouble() < P_Ember)
+                            {
+                                nextGrid[newI, newJ] = 2; // Ember ignites the cell
+                                hasBurning = true;
+                            }
+                        }
                     }
                 }
             }
@@ -244,6 +296,7 @@
             1 => "residential",
             2 => "burning",
             3 => "burnt",
+            4 => "road",
             _ => ""
         };
     }
