@@ -78,34 +78,54 @@
             </div>
         </div>
     </div>
+    <div class="d-flex justify-content-center legend mt-3">
+        <div class="legend-label"><span class="legend-item forest"></span> Forest</div>
+        <div class="legend-label"><span class="legend-item residential"></span> Residential</div>
+        <div class="legend-label"><span class="legend-item road"></span> Road</div>
+        <div class="legend-label"><span class="legend-item burning"></span> Burning</div>
+        <div class="legend-label"><span class="legend-item burnt"></span> Burnt</div>
+    </div>
 </div>
 
 <!-- Custom Styles for Grid Cells -->
 <style>
     .forest {
-        background-color: green;
+        background-color: #228b22;
     }
 
     .residential {
-        background-color: brown;
+        background-color: #d2b48c;
     }
 
     .burning {
-        background-color: red;
+        background-color: #ff4500;
     }
 
     .burnt {
-        background-color: black;
+        background-color: #555555;
     }
 
     .road {
-        background-color: gray;
+        background-color: #808080;
     }
 
     td {
-        width: 15px;
-        height: 15px;
-        border: 1px solid #ccc;
+        width: 20px;
+        height: 20px;
+        border: 1px solid #dee2e6;
+    }
+
+    .legend-item {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        margin-right: 4px;
+        border: 1px solid #dee2e6;
+    }
+
+    .legend-label {
+        margin-right: 12px;
+        line-height: 20px;
     }
 </style>
 
